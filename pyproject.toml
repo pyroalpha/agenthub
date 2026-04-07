@@ -14,7 +14,7 @@ dependencies = [
     "gitpython>=3.1",
     "pyyaml>=6.0",
     "tenacity>=9.0",
-    "pokemon>=0.1.0,<0.2.0",
+    "pokemon>=0.36",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
 ]
