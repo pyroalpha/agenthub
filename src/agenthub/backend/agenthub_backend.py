@@ -22,6 +22,7 @@ from deepagents.backends.protocol import (
 
 from agenthub.core.config import (
     ALLOWED_GIT_SUBCOMMANDS,
+    FORBIDDEN_GIT_SUBCOMMANDS,
     DANGEROUS_PATTERNS,
     get_config,
 )
@@ -342,6 +343,20 @@ class AgentHubBackend(SandboxBackendProtocol):
                     hint=f"Only these subcommands are allowed: {', '.join(sorted(ALLOWED_GIT_SUBCOMMANDS))}",
                     safe_retry="Use 'git status' to check repository state first, then use an allowed subcommand",
                     stop_condition="If your required operation needs a disallowed subcommand, abort and report the limitation",
+                ),
+                exit_code=1,
+                truncated=False,
+            )
+
+        # Check against forbidden list
+        if subcommand in FORBIDDEN_GIT_SUBCOMMANDS:
+            return ExecuteResponse(
+                output=self._format_error(
+                    error_type="git_subcommand_forbidden",
+                    root_cause=f"git subcommand '{subcommand}' is forbidden for safety",
+                    hint=f"These operations are handled by API Layer: {', '.join(sorted(FORBIDDEN_GIT_SUBCOMMANDS))}",
+                    safe_retry="Use 'git status' to check repository state, or use 'git commit' for演进 records",
+                    stop_condition="If you need git init, abort - it's handled by the API Layer",
                 ),
                 exit_code=1,
                 truncated=False,

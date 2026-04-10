@@ -36,6 +36,7 @@ ALLOWED_GIT_SUBCOMMANDS: set[str] = {
 
 # 禁止的命令（安全风险）
 FORBIDDEN_GIT_SUBCOMMANDS: set[str] = {
+    "init",       # 禁止初始化，API Layer统一处理
     "push",       # 禁止推送到远程
     "pull",       # 禁止从远程拉取
     "fetch",      # 禁止从远程获取

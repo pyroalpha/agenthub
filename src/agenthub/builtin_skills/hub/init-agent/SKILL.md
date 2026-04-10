@@ -56,10 +56,7 @@ Create a new agent with properly structured bootstrap files using a three-phase 
 ┌─────────────────────────────────────────────────────────────┐
 │  FINALIZE: Finalize                                         │
 │                                                             │
-│  1. Git init (if not initialized)                           │
-│  2. Git add -A                                              │
-│  3. Git commit (using name)                                │
-│  4. Return InitAgentResult                                  │
+│  1. Return InitAgentResult                                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -71,7 +68,7 @@ tools:
     - read_file
     - glob
     - write_file
-    - bash  # git init, git add, git commit, mkdir
+    - bash  # mkdir, ls, stat only
   read_only:
     - bash  # ls, stat only
 context: inline
@@ -111,8 +108,7 @@ if not context.get("name"):
   "inspirationSeed": 123456789,
   "agent_name": "Midnight",
   "personality": "A curious helper who loves debugging",
-  "files_written": ["soul.md", "identity.md", "BOOTSTRAP.md"],
-  "git_commit": "abc1234"
+  "files_written": ["soul.md", "identity.md", "BOOTSTRAP.md"]
 }
 ```
 
@@ -126,7 +122,6 @@ if not context.get("name"):
 | `agent_name` | string | Yes | LLM-generated agent name |
 | `personality` | string | Yes | LLM-generated personality description |
 | `files_written` | array | Yes | **Must** be the list of filenames actually created via `write_file` tool (filename only, no path, e.g., `["soul.md", "identity.md"]`) |
-| `git_commit` | string/null | No | Git commit hash |
 
 ## Bootstrap File Frontmatter
 
@@ -198,19 +193,6 @@ updated: {timestamp}
 - Point to where memories live, not the memories themselves
 - Memory is runtime data, not bootstrap data
 
-## Git Operations
-
-```bash
-# Initialize (if needed)
-git init
-
-# Add all files
-git add -A
-
-# Initial commit
-git commit -m "InitAgent: create {name}"
-```
-
 ## File Creation Order
 
 1. **First**: soul.md — establish identity
@@ -244,7 +226,6 @@ When an error is detected, **must** return the JSON format below; **do not** ret
 | `AGENT_EXISTS` | Agent already exists | Return error JSON, do not overwrite |
 | `MISSING_NAME` | Missing name parameter | Return error JSON |
 | `SKILL_EXECUTION_ERROR` | Skill execution failed | Return error JSON |
-| `GIT_INIT_ERROR` | Git initialization failed | Return `git_commit: null`, continue |
 
 ## Anti-Patterns
 
@@ -253,7 +234,6 @@ When an error is detected, **must** return the JSON format below; **do not** ret
 | Generic soul.md | "I am a helpful AI" - not distinctive | Include specific traits and communication style |
 | Overly long files | Cognitive overhead, not readable | Keep soul.md < 50 lines, identity.md < 20 lines |
 | No Pre-Flight Check | Risk of overwriting existing agent | Always verify agent_id doesn't exist |
-| No git init | No audit trail | Always initialize git on first creation |
 | Hardcoded paths | Not portable | Use context variables for all paths |
 | Skipping skill copy | Agent can't self-evolve | (API Layer handles this automatically) |
 | Inconsistent voice | Confusing identity | Keep tone consistent across bootstrap files |
@@ -266,5 +246,4 @@ Before finalizing:
 - [ ] BOOTSTRAP.md is under 30 lines, just recall mechanism
 - [ ] No contradictions between files
 - [ ] Voice/style is consistent across files
-- [ ] Git commit message uses agent name
 - [ ] At least 5 anti-patterns avoided

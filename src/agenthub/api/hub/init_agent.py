@@ -1,20 +1,16 @@
 """Init Agent API - AgentHub perspective.
 
 API Layer responsibilities:
-- Generate agent_id (deterministic based on name + timestamp, or UUID fallback)
+- Generate agent_id (no timestamp)
+- Generate agent_name (separate from agent_id)
+- Conflict detection before directory creation
 - Get Pokemon avatar via get_pokemon_avatar()
-- Write Pokemon data to companion.json
 - Create empty directory structure
 - Copy builtin skills (evolution, self-evolution) to agent's skills/builtin/
 - Call executor.execute()
 - Parse Skill return result
 - Verify files written
 - Return Agent object
-
-Skill Layer responsibilities (init-agent Skill):
-- ORIENT: Read context, generate inspirationSeed, agent_name, personality (if not provided)
-- GENERATE: Write bootstrap files (soul.md, identity.md, BOOTSTRAP.md)
-- FINALIZE: Git init + commit, return InitAgentResult
 """
 
 from __future__ import annotations
@@ -42,18 +38,14 @@ async def init_agent(config: InitAgentConfig) -> Agent:
     """Initialize a new agent with bootstrap files.
 
     API Layer responsibilities:
-    - Generate agent_id (deterministic based on name)
-    - Create empty directory structure
+    - Generate agent_id (no timestamp)
+    - Generate agent_name (separate from agent_id)
+    - Create directory structure
     - Copy builtin skills to agent's skills/builtin/
     - Call executor.execute()
     - Parse Skill return result
     - Verify files written
     - Return Agent object
-
-    Skill Layer responsibilities (init-agent Skill):
-    - ORIENT: Read context, generate inspirationSeed, agent_name, personality
-    - GENERATE: Write bootstrap files (soul.md, identity.md, BOOTSTRAP.md)
-    - FINALIZE: Git init + commit, return InitAgentResult
 
     Args:
         config: Agent initialization configuration
@@ -62,7 +54,7 @@ async def init_agent(config: InitAgentConfig) -> Agent:
         Created Agent object
 
     Raises:
-        ValidationError: If config validation fails
+        ValidationError: If config validation fails or name contains non-ASCII
         AgentHubError: If agent creation fails
     """
     logger.info(f"Initializing agent: {config.name}")
@@ -75,16 +67,24 @@ async def init_agent(config: InitAgentConfig) -> Agent:
 
     config_obj = get_config()
 
-    # 2. Generate agent_id (API Layer responsibility)
-    # Handle None name with UUID fallback, ensure lowercase
-    agent_id = _generate_agent_id(validated_config.name)
-    agent_id = agent_id.lower()
+    # 2. Generate agent_id and agent_name (API Layer responsibility)
+    # If user provided name: agent_id = slugify(name), agent_name = user input
+    # If no name: get random pokemon first, then agent_id = {pokemon_name}-{uuid}
+    if validated_config.name:
+        # User provided name
+        agent_id = _generate_agent_id(validated_config.name)
+        agent_name = validated_config.name
+        # Get Pokemon avatar (random, user name is display name)
+        pokemon_data = get_pokemon_avatar(agent_id, validated_config.name)[0]
+    else:
+        # No user name: get random Pokemon first, then generate agent_id
+        pokemon_data = get_pokemon_avatar(agent_id="temp", requested_name=None)[0]
+        agent_name = pokemon_data.name
+        agent_id = _generate_agent_id(None, pokemon_data.name)
+
     agent_dir = config_obj.agenthub_dir / agent_id
 
-    # 3. Get Pokemon avatar (API Layer responsibility)
-    pokemon_data, agent_name = get_pokemon_avatar(agent_id, validated_config.name)
-
-    # 4. Create directory structure (API Layer responsibility)
+    # 3. Create directory structure
     try:
         _create_directory_structure(agent_dir)
     except OSError as e:
@@ -118,15 +118,15 @@ async def init_agent(config: InitAgentConfig) -> Agent:
             task_description="Initialize a new agent with bootstrap files.",
             agent_id=agent_id,
             context={
-                "name": agent_name,  # Use Pokemon-matched name
+                "name": agent_name,  # User input or Pokemon name
                 "personality": get_personality(validated_config.personality),  # Pass through or None
                 "identity": validated_config.identity,
                 "traits": validated_config.traits,
-                "agent_id": agent_id,  # API layer generated deterministic ID
+                "agent_id": agent_id,  # API layer generated ID
                 "pokemon_data": pokemon_data.model_dump(),  # Pokemon companion data
             },
             timeout=config_obj.init_agent_timeout,
-            scope="agenthub",
+            scope="agent",
         )
 
         # 8. Parse Skill return result
@@ -134,6 +134,21 @@ async def init_agent(config: InitAgentConfig) -> Agent:
 
         # 9. Verify files written
         _verify_files_written(agent_dir, init_result.files_written)
+
+        # 10. Git init
+        from agenthub.core.vcs import vcs_init_agent
+
+        git_commit = None
+        try:
+            git_commit = vcs_init_agent(
+                agent_dir,
+                init_result.agent_name or agent_name,
+                config_obj.agenthub_dir,
+            )
+        except Exception as e:
+            logger.warning(f"vcs_init_agent failed: {e}")
+
+        init_result.git_commit = git_commit
 
         logger.info(f"Agent '{agent_id}' initialized successfully at {agent_dir}")
 
@@ -162,27 +177,37 @@ async def init_agent(config: InitAgentConfig) -> Agent:
         raise AgentHubError(f"SKILL_EXECUTION_ERROR: {e}") from e
 
 
-def _generate_agent_id(name: str | None) -> str:
-    """Generate a unique agent ID from name.
+def _generate_agent_id(name: str | None, pokemon_name: str | None = None) -> str:
+    """Generate URL-safe agent ID from name.
 
     Args:
-        name: Agent name (can be None for UUID fallback)
+        name: Agent name (must be ASCII alphanumeric).
+        pokemon_name: Pokemon name for fallback when name is None.
 
     Returns:
-        URL-safe agent ID (lowercase)
+        URL-safe agent ID (lowercase, no timestamp).
+
+    Raises:
+        ValidationError: If name contains non-ASCII characters.
     """
     if name:
+        # Validate: name must be ASCII alphanumeric
+        if not name.isascii():
+            raise ValidationError("NAME_MUST_BE_ASCII: Agent name must be English alphanumeric")
         # Convert to lowercase, replace spaces with hyphens, remove special chars
         agent_id = re.sub(r"[^a-z0-9]+", "-", name.lower())
         agent_id = agent_id.strip("-")
         if not agent_id:
             agent_id = "agent"
+        return agent_id
     else:
-        # UUID fallback for None name
-        agent_id = f"agent-{uuid.uuid4().hex[:8]}"
-    # Add timestamp for uniqueness
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    return f"{agent_id}-{timestamp}"
+        # No user name: use {pokemon_name}-{uuid}
+        if not pokemon_name:
+            pokemon_name = "agent"
+        slug = re.sub(r"[^a-z0-9]+", "-", pokemon_name.lower())
+        slug = slug.strip("-")
+        uuid_suffix = uuid.uuid4().hex[:8]
+        return f"{slug}-{uuid_suffix}"
 
 
 def _create_directory_structure(agent_dir: Path) -> None:
