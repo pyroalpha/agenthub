@@ -25,10 +25,10 @@ Create a new agent with properly structured bootstrap files using a three-phase 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Responsibilities**: API layer passes context and agent_id, and pre-copies builtin skills. API layer has already written Pokemon companion data to companion.json. Skill layer is responsible for generating personality and writing bootstrap files (soul.md, identity.md, BOOTSTRAP.md).
+**Responsibilities**: API layer passes context and agent_id, and pre-copies builtin skills. API layer has already written Pokemon companion data to .agenthub_meta. Skill layer is responsible for generating personality and writing bootstrap files (soul.md, identity.md, BOOTSTRAP.md).
 
 **Pokemon Companion**:
-- Pokemon companion data is stored in companion.json (written by API layer)
+- Pokemon companion data is stored in .agenthub_meta (written by API layer)
 - If `context.personality` is null, LLM should generate personality based on `context.pokemon_data` type/abilities
 - Pokemon type influences personality (e.g., electric type → energetic, quick-tempered)
 - Do NOT write Pokemon data to soul.md - soul.md should only contain agent identity and personality
@@ -38,6 +38,11 @@ Create a new agent with properly structured bootstrap files using a three-phase 
 **IMPORTANT**: You MUST use the `write_file` tool to actually create the bootstrap files. Do not assume files exist - you must create them.
 
 **NOTE**: Builtin skills (evolution, self-evolution) are copied by the API layer before Skill execution. You only need to write the bootstrap files.
+
+**Path convention**: The backend's `root_dir` is already set to the agent's directory.
+Write files using **bare filenames only**:
+- ✅ Correct: `write_file("soul.md", content)`
+- ❌ Wrong:  `write_file("metapod/soul.md", content)` — the `metapod/` prefix causes the path to resolve outside the allowed directory.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -82,8 +87,8 @@ Validate before writing files:
 
 ```python
 # 1. Check if agent_id directory already exists
-# Note: agent_id directory is provided in context, use glob tool to check
-existing = glob(f"{context.agent_id}/*")
+# Note: backend's root_dir already points to agent directory, use glob to check root
+existing = glob("*", path="/")  # Check files in agent root directory
 if existing:
     return {"error": "AGENT_EXISTS", "agent_id": context.agent_id}
 
@@ -127,7 +132,7 @@ if not context.get("name"):
 
 ### soul.md frontmatter
 
-**Note**: Pokemon companion data is stored in companion.json (written by API layer). Skill layer writes soul.md without Pokemon frontmatter.
+**Note**: Pokemon companion data is stored in .agenthub_meta (written by API layer). Skill layer writes soul.md without Pokemon frontmatter.
 
 ```yaml
 ---
@@ -207,7 +212,7 @@ updated: {timestamp}
 | `personality` | User input or LLM generated | Agent personality (null means LLM should generate based on Pokemon) |
 | `identity` | User input | Agent role description |
 | `traits` | User input | List of personality traits |
-| `agent_id` | API layer generated | Unique identifier; Skill uses this ID to create directories and files |
+| `agent_id` | API layer generated | Unique identifier for the agent. The backend's `root_dir` is already set to `agenthub_dir/agent_id`, so write files using bare filenames only (e.g., `soul.md`). Do NOT prefix paths with `agent_id` — the backend will resolve `metapod/soul.md` as `agenthub_dir/metapod/metapod/soul.md`, which is outside the allowed directory. |
 | `pokemon_data` | API layer generated | Pokemon Companion data (type, abilities, etc.) |
 
 ## Error Handling
