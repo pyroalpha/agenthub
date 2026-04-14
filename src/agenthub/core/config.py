@@ -36,16 +36,14 @@ ALLOWED_GIT_SUBCOMMANDS: set[str] = {
 
 # 禁止的命令（安全风险）
 FORBIDDEN_GIT_SUBCOMMANDS: set[str] = {
+    "init",       # 禁止初始化，API Layer统一处理
     "push",       # 禁止推送到远程
     "pull",       # 禁止从远程拉取
     "fetch",      # 禁止从远程获取
     "branch",     # 禁止分支操作
-    "checkout",   # 禁止切换分支
     "merge",      # 禁止合并
     "rebase",     # 禁止变基
     "clone",      # 禁止克隆
-    "init",       # 禁止初始化
-    "stash",      # 禁止储藏
     "tag",        # 禁止标签
     "describe",   # 禁止描述
     "symbolic-ref",  # 禁止符号引用

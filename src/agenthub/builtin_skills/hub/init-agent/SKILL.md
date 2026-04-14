@@ -25,10 +25,10 @@ Create a new agent with properly structured bootstrap files using a three-phase 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Responsibilities**: API layer passes context and agent_id, and pre-copies builtin skills. API layer has already written Pokemon companion data to companion.json. Skill layer is responsible for generating personality and writing bootstrap files (soul.md, identity.md, BOOTSTRAP.md).
+**Responsibilities**: API layer passes context and agent_id, and pre-copies builtin skills. API layer has already written Pokemon companion data to .agenthub_meta. Skill layer is responsible for generating personality and writing bootstrap files (soul.md, identity.md, BOOTSTRAP.md).
 
 **Pokemon Companion**:
-- Pokemon companion data is stored in companion.json (written by API layer)
+- Pokemon companion data is stored in .agenthub_meta (written by API layer)
 - If `context.personality` is null, LLM should generate personality based on `context.pokemon_data` type/abilities
 - Pokemon type influences personality (e.g., electric type → energetic, quick-tempered)
 - Do NOT write Pokemon data to soul.md - soul.md should only contain agent identity and personality
@@ -38,6 +38,11 @@ Create a new agent with properly structured bootstrap files using a three-phase 
 **IMPORTANT**: You MUST use the `write_file` tool to actually create the bootstrap files. Do not assume files exist - you must create them.
 
 **NOTE**: Builtin skills (evolution, self-evolution) are copied by the API layer before Skill execution. You only need to write the bootstrap files.
+
+**Path convention**: The backend's `root_dir` is already set to the agent's directory.
+Write files using **bare filenames only**:
+- ✅ Correct: `write_file("soul.md", content)`
+- ❌ Wrong:  `write_file("metapod/soul.md", content)` — the `metapod/` prefix causes the path to resolve outside the allowed directory.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -56,10 +61,7 @@ Create a new agent with properly structured bootstrap files using a three-phase 
 ┌─────────────────────────────────────────────────────────────┐
 │  FINALIZE: Finalize                                         │
 │                                                             │
-│  1. Git init (if not initialized)                           │
-│  2. Git add -A                                              │
-│  3. Git commit (using name)                                │
-│  4. Return InitAgentResult                                  │
+│  1. Return InitAgentResult                                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -71,7 +73,7 @@ tools:
     - read_file
     - glob
     - write_file
-    - bash  # git init, git add, git commit, mkdir
+    - bash  # mkdir, ls, stat only
   read_only:
     - bash  # ls, stat only
 context: inline
@@ -85,8 +87,8 @@ Validate before writing files:
 
 ```python
 # 1. Check if agent_id directory already exists
-# Note: agent_id directory is provided in context, use glob tool to check
-existing = glob(f"{context.agent_id}/*")
+# Note: backend's root_dir already points to agent directory, use glob to check root
+existing = glob("*", path="/")  # Check files in agent root directory
 if existing:
     return {"error": "AGENT_EXISTS", "agent_id": context.agent_id}
 
@@ -111,8 +113,7 @@ if not context.get("name"):
   "inspirationSeed": 123456789,
   "agent_name": "Midnight",
   "personality": "A curious helper who loves debugging",
-  "files_written": ["soul.md", "identity.md", "BOOTSTRAP.md"],
-  "git_commit": "abc1234"
+  "files_written": ["soul.md", "identity.md", "BOOTSTRAP.md"]
 }
 ```
 
@@ -126,13 +127,12 @@ if not context.get("name"):
 | `agent_name` | string | Yes | LLM-generated agent name |
 | `personality` | string | Yes | LLM-generated personality description |
 | `files_written` | array | Yes | **Must** be the list of filenames actually created via `write_file` tool (filename only, no path, e.g., `["soul.md", "identity.md"]`) |
-| `git_commit` | string/null | No | Git commit hash |
 
 ## Bootstrap File Frontmatter
 
 ### soul.md frontmatter
 
-**Note**: Pokemon companion data is stored in companion.json (written by API layer). Skill layer writes soul.md without Pokemon frontmatter.
+**Note**: Pokemon companion data is stored in .agenthub_meta (written by API layer). Skill layer writes soul.md without Pokemon frontmatter.
 
 ```yaml
 ---
@@ -198,19 +198,6 @@ updated: {timestamp}
 - Point to where memories live, not the memories themselves
 - Memory is runtime data, not bootstrap data
 
-## Git Operations
-
-```bash
-# Initialize (if needed)
-git init
-
-# Add all files
-git add -A
-
-# Initial commit
-git commit -m "InitAgent: create {name}"
-```
-
 ## File Creation Order
 
 1. **First**: soul.md — establish identity
@@ -225,7 +212,7 @@ git commit -m "InitAgent: create {name}"
 | `personality` | User input or LLM generated | Agent personality (null means LLM should generate based on Pokemon) |
 | `identity` | User input | Agent role description |
 | `traits` | User input | List of personality traits |
-| `agent_id` | API layer generated | Unique identifier; Skill uses this ID to create directories and files |
+| `agent_id` | API layer generated | Unique identifier for the agent. The backend's `root_dir` is already set to `agenthub_dir/agent_id`, so write files using bare filenames only (e.g., `soul.md`). Do NOT prefix paths with `agent_id` — the backend will resolve `metapod/soul.md` as `agenthub_dir/metapod/metapod/soul.md`, which is outside the allowed directory. |
 | `pokemon_data` | API layer generated | Pokemon Companion data (type, abilities, etc.) |
 
 ## Error Handling
@@ -244,7 +231,6 @@ When an error is detected, **must** return the JSON format below; **do not** ret
 | `AGENT_EXISTS` | Agent already exists | Return error JSON, do not overwrite |
 | `MISSING_NAME` | Missing name parameter | Return error JSON |
 | `SKILL_EXECUTION_ERROR` | Skill execution failed | Return error JSON |
-| `GIT_INIT_ERROR` | Git initialization failed | Return `git_commit: null`, continue |
 
 ## Anti-Patterns
 
@@ -253,7 +239,6 @@ When an error is detected, **must** return the JSON format below; **do not** ret
 | Generic soul.md | "I am a helpful AI" - not distinctive | Include specific traits and communication style |
 | Overly long files | Cognitive overhead, not readable | Keep soul.md < 50 lines, identity.md < 20 lines |
 | No Pre-Flight Check | Risk of overwriting existing agent | Always verify agent_id doesn't exist |
-| No git init | No audit trail | Always initialize git on first creation |
 | Hardcoded paths | Not portable | Use context variables for all paths |
 | Skipping skill copy | Agent can't self-evolve | (API Layer handles this automatically) |
 | Inconsistent voice | Confusing identity | Keep tone consistent across bootstrap files |
@@ -266,5 +251,4 @@ Before finalizing:
 - [ ] BOOTSTRAP.md is under 30 lines, just recall mechanism
 - [ ] No contradictions between files
 - [ ] Voice/style is consistent across files
-- [ ] Git commit message uses agent name
 - [ ] At least 5 anti-patterns avoided
